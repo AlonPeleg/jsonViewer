@@ -49,6 +49,8 @@
         .tab-viewport { flex-grow: 1; overflow: hidden; position: relative; }
         .tab-pane { display: none; height: 100%; width: 100%; overflow-y: auto; padding: 12px; box-sizing: border-box; }
         .tab-pane.active { display: block; }
+        #editor-pane.active { display: flex; flex-direction: column; overflow: hidden; }
+        #editor-pane.active > *:not(#editorCompareResults) { flex-shrink: 0; }
 
         .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
         .btn-group { display: flex; gap: 8px; align-items: center; }
@@ -132,18 +134,20 @@
         .compare-header { display: flex; justify-content: space-between; align-items: center; padding: 2px 4px; }
         .compare-label { font-size: 10px; text-transform: uppercase; opacity: 0.7; font-weight: bold; }
         
-        .diff-output { margin-top: 15px; border: 1px solid var(--vscode-panel-border); padding: 10px; background: var(--vscode-editor-background); font-family: monospace; font-size: 12px; border-radius: 4px; overflow-y: auto; max-height: 260px; }
-        .diff-line { padding: 4px 8px; border-radius: 2px; margin-bottom: 2px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 10px; transition: background 0.1s; }
+        .diff-output { margin-top: 15px; border: 1px solid var(--vscode-panel-border); padding: 10px; background: var(--vscode-editor-background); font-family: monospace; font-size: 12px; border-radius: 4px; overflow-y: auto; overflow-x: hidden; flex: 1 1 auto; min-height: 120px; }
+        .diff-line { padding: 4px 8px; border-radius: 2px; margin-bottom: 2px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 10px; transition: background 0.1s; max-width: 100%; }
         .diff-line:hover { background: var(--vscode-list-hoverBackground); }
-        .diff-content-box { display: flex; align-items: center; gap: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .diff-content-box { display: flex; align-items: center; gap: 8px; overflow: hidden; min-width: 0; flex: 1 1 auto; }
         .diff-icon { font-weight: bold; width: 12px; text-align: center; flex-shrink: 0; }
+        .diff-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
         
         .diff-added { background: rgba(78, 201, 176, 0.1); color: #4ec9b0; border-left: 3px solid #4ec9b0; }
         .diff-removed { background: rgba(244, 135, 113, 0.1); color: #f48771; border-left: 3px solid #f48771; }
         .diff-changed { background: rgba(220, 220, 170, 0.1); color: #dcdcaa; border-left: 3px solid #dcdcaa; }
         
         .diff-tag { font-size: 9px; font-weight: bold; text-transform: uppercase; opacity: 0.8; flex-shrink: 0; }
-        .side-diff-container { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .side-diff-container { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; min-width: 0; }
+        .side-diff-container > div { min-width: 0; }
 
         .switch-container { display: flex; align-items: center; gap: 6px; font-size: 11px; opacity: 0.8; cursor: pointer; user-select: none; }
         .switch { position: relative; display: inline-block; width: 28px; height: 16px; }
@@ -837,15 +841,24 @@
             contentBox.className = 'diff-content-box';
             let icon = d.type === 'added' ? '+' : (d.type === 'removed' ? '-' : 'Δ');
             let displayVal = d.type === 'changed' ? d.newVal : d.val;
-            contentBox.innerHTML = `<span class="diff-icon">${icon}</span> <span><b>${d.path}</b>: ${JSON.stringify(displayVal)}</span>`;
+            const iconSpan = document.createElement('span');
+            iconSpan.className = 'diff-icon';
+            iconSpan.textContent = icon;
+            const textSpan = document.createElement('span');
+            textSpan.className = 'diff-text';
+            const valueStr = JSON.stringify(displayVal);
+            textSpan.innerHTML = `<b>${d.path}</b>: ${valueStr}`;
+            textSpan.title = d.path + ': ' + valueStr;
+            contentBox.appendChild(iconSpan);
+            contentBox.appendChild(textSpan);
             const tag = document.createElement('span');
             tag.className = 'diff-tag';
             tag.textContent = '[' + d.type.toUpperCase() + ']';
             div.appendChild(contentBox); div.appendChild(tag);
             div.onclick = () => {
-                if (d.type === 'removed') scrollToEditorDiffKey(d.key, 'editorLeft');
-                else if (d.type === 'added') scrollToEditorDiffKey(d.key, 'editorRight');
-                else if (d.type === 'changed') { scrollToEditorDiffKey(d.key, 'editorLeft'); scrollToEditorDiffKey(d.key, 'editorRight'); }
+                if (d.type === 'removed') scrollToEditorPath(d.path, 'editorLeft');
+                else if (d.type === 'added') scrollToEditorPath(d.path, 'editorRight');
+                else if (d.type === 'changed') { scrollToEditorPath(d.path, 'editorLeft'); scrollToEditorPath(d.path, 'editorRight'); }
             };
             return div;
         }
@@ -914,20 +927,149 @@
             return diffs;
         }
 
-        function scrollToEditorDiffKey(key, panelId) {
+        // Walks the raw JSON text (not the parsed object) so we can map every path
+        // (e.g. "root.customers.0.addresses.0") to its exact character range in the
+        // text — including array items, which have no quoted "key" to search for.
+        function buildJsonPathOffsets(text) {
+            const offsets = {};
+            const n = text.length;
+            let i = 0;
+
+            function skipWs() { while (i < n && /\s/.test(text[i])) i++; }
+
+            function parseString() {
+                const start = i;
+                i++; // opening quote
+                while (i < n) {
+                    if (text[i] === '\\') { i += 2; continue; }
+                    if (text[i] === '"') { i++; break; }
+                    i++;
+                }
+                return text.slice(start, i);
+            }
+
+            function parseValue(path) {
+                skipWs();
+                const start = i;
+                const ch = text[i];
+                if (ch === '{') parseObject(path);
+                else if (ch === '[') parseArray(path);
+                else if (ch === '"') parseString();
+                else { while (i < n && !/[,}\]\s]/.test(text[i])) i++; }
+                offsets[path] = { start, end: i };
+            }
+
+            function parseObject(path) {
+                i++; // {
+                skipWs();
+                if (text[i] === '}') { i++; return; }
+                while (i < n) {
+                    skipWs();
+                    if (text[i] !== '"') break;
+                    const rawKey = parseString();
+                    let key;
+                    try { key = JSON.parse(rawKey); } catch (e) { key = rawKey.slice(1, -1); }
+                    skipWs();
+                    if (text[i] === ':') i++;
+                    parseValue(path + '.' + key);
+                    skipWs();
+                    if (text[i] === ',') { i++; continue; }
+                    if (text[i] === '}') { i++; }
+                    break;
+                }
+            }
+
+            function parseArray(path) {
+                i++; // [
+                skipWs();
+                if (text[i] === ']') { i++; return; }
+                let idx = 0;
+                while (i < n) {
+                    parseValue(path + '.' + idx);
+                    idx++;
+                    skipWs();
+                    if (text[i] === ',') { i++; continue; }
+                    if (text[i] === ']') { i++; }
+                    break;
+                }
+            }
+
+            parseValue('root');
+            return offsets;
+        }
+
+        // Measures the exact pixel offset of a character index inside a (possibly wrapping)
+        // textarea, by mirroring its box/font metrics into a hidden div. Line-counting alone
+        // isn't reliable here since long values (e.g. long strings) soft-wrap into multiple
+        // visual rows, which throws off any calculation based on counting '\n' characters.
+        function getTextareaOffsetTop(el, charIndex) {
+            const mirror = document.createElement('div');
+            const style = window.getComputedStyle(el);
+            const propsToCopy = [
+                'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+                'fontStyle', 'fontVariant', 'fontWeight', 'fontStretch', 'fontSize', 'lineHeight', 'fontFamily',
+                'textAlign', 'textTransform', 'textIndent', 'letterSpacing', 'wordSpacing',
+                'whiteSpace', 'wordWrap', 'wordBreak', 'direction'
+            ];
+            propsToCopy.forEach(prop => { mirror.style[prop] = style[prop]; });
+            // Use clientWidth (padding box, excludes border + any scrollbar) with a matching
+            // border-box so the mirror wraps text at exactly the same width the real
+            // textarea does — including when a vertical scrollbar is eating into that width.
+            mirror.style.boxSizing = 'border-box';
+            mirror.style.width = el.clientWidth + 'px';
+            mirror.style.border = 'none';
+            mirror.style.position = 'absolute';
+            mirror.style.visibility = 'hidden';
+            mirror.style.top = '0';
+            mirror.style.left = '-9999px';
+            mirror.style.height = 'auto';
+            mirror.style.overflow = 'hidden';
+
+            mirror.textContent = el.value.substring(0, charIndex);
+            const marker = document.createElement('span');
+            marker.textContent = el.value.substring(charIndex, charIndex + 1) || '.';
+            mirror.appendChild(marker);
+
+            document.body.appendChild(mirror);
+            const top = marker.offsetTop;
+            document.body.removeChild(mirror);
+            return top;
+        }
+
+        function scrollToEditorPath(fullPath, panelId) {
             setEditorMode(panelId, 'edit', null);
             const el = document.getElementById(panelId);
             const text = el.value;
-            const pattern = '"' + key + '"';
-            const index = text.indexOf(pattern);
-            if (index !== -1) {
-                el.focus();
-                el.setSelectionRange(index, index + pattern.length);
-                const lines = text.substr(0, index).split('\n').length;
-                el.scrollTop = (lines - 4) * 18;
-                el.classList.add('highlight-flash');
-                setTimeout(() => el.classList.remove('highlight-flash'), 1200);
+            let range;
+            try {
+                const offsets = buildJsonPathOffsets(text);
+                range = offsets[fullPath];
+            } catch (e) { range = null; }
+            if (!range) return;
+            el.focus();
+            el.setSelectionRange(range.start, range.end);
+
+            let scrollTop;
+            try {
+                const caretTop = getTextareaOffsetTop(el, range.start);
+                scrollTop = caretTop - el.clientHeight / 2;
+            } catch (e) {
+                const styles = window.getComputedStyle(el);
+                let lineHeight = parseFloat(styles.lineHeight);
+                if (!lineHeight || isNaN(lineHeight)) {
+                    const fontSize = parseFloat(styles.fontSize) || 11;
+                    lineHeight = fontSize * 1.35;
+                }
+                const targetLine = text.substring(0, range.start).split('\n').length - 1;
+                const visibleLines = el.clientHeight / lineHeight;
+                scrollTop = (targetLine - visibleLines / 2) * lineHeight;
             }
+            const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+            scrollTop = Math.max(0, Math.min(scrollTop, maxScroll));
+            el.scrollTop = scrollTop;
+
+            el.classList.add('highlight-flash');
+            setTimeout(() => el.classList.remove('highlight-flash'), 1200);
         }
 
         ['editorLeft', 'editorRight'].forEach(id => {
@@ -1003,6 +1145,14 @@
 
         function sanitizeXmlKey(key) {
             return key.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^(\d)/, '_$1');
+        }
+
+        // The "__jsontype" attribute is an internal marker used to losslessly round-trip
+        // empty arrays/objects through XML. It's kept in the stored DOM/rawString (so future
+        // conversions stay correct) but must never appear in anything the user views, copies,
+        // or exports.
+        function stripInternalXmlMarkers(str) {
+            return str.replace(/\s*__jsontype="(?:array|object)"/g, '');
         }
 
         function jsonToXml(obj, rootName = "root") {
@@ -1140,7 +1290,7 @@
 
             const copyBtn = entry.querySelector('.btn-copy');
             copyBtn.onclick = () => {
-                const text = type === 'json' ? JSON.stringify(data, null, 4) : rawString;
+                const text = type === 'json' ? JSON.stringify(data, null, 4) : stripInternalXmlMarkers(rawString);
                 navigator.clipboard.writeText(text).then(() => {
                     copyBtn.innerHTML = '<span style="color:#89d185; font-size:11px; font-weight:bold;">✓</span>';
                     setTimeout(() => copyBtn.innerHTML = copyIconSvg, 600);
@@ -1149,7 +1299,7 @@
 
             const minifyBtn = entry.querySelector('.btn-minify');
             minifyBtn.onclick = () => {
-                let text = type === 'json' ? JSON.stringify(data) : rawString.replace(/>\s+</g, '><').trim();
+                let text = type === 'json' ? JSON.stringify(data) : stripInternalXmlMarkers(rawString.replace(/>\s+</g, '><').trim());
                 navigator.clipboard.writeText(text).then(() => {
                     minifyBtn.innerHTML = '<span style="color:#89d185; font-size:11px; font-weight:bold;">✓</span>';
                     setTimeout(() => minifyBtn.innerHTML = minifyIconSvg, 600);
@@ -1170,7 +1320,7 @@
                     name = `Export_${YYYY}${MM}${DD}_${HH}${min}${ss}`;
                 }
 
-                let dataToSave = type === 'json' ? JSON.stringify(data, null, 4) : new XMLSerializer().serializeToString(data);
+                let dataToSave = type === 'json' ? JSON.stringify(data, null, 4) : stripInternalXmlMarkers(new XMLSerializer().serializeToString(data));
                 const blob = new Blob([dataToSave], {type: 'text/plain'});
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -1267,6 +1417,7 @@
             tagOpen.textContent = '<' + node.tagName;
             line.appendChild(tagOpen);
             Array.from(node.attributes).forEach(attr => {
+                if (attr.name === '__jsontype') return;
                 const a = document.createElement('span');
                 a.innerHTML = ` <span class="xml-attr">${attr.name}</span>="<span class="string">${attr.value}</span>"`;
                 line.appendChild(a);
