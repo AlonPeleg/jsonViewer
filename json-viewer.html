@@ -132,7 +132,7 @@
         .compare-header { display: flex; justify-content: space-between; align-items: center; padding: 2px 4px; }
         .compare-label { font-size: 10px; text-transform: uppercase; opacity: 0.7; font-weight: bold; }
         
-        .diff-output { margin-top: 15px; border: 1px solid var(--vscode-panel-border); padding: 10px; background: var(--vscode-editor-background); font-family: monospace; font-size: 12px; border-radius: 4px; overflow: auto; }
+        .diff-output { margin-top: 15px; border: 1px solid var(--vscode-panel-border); padding: 10px; background: var(--vscode-editor-background); font-family: monospace; font-size: 12px; border-radius: 4px; overflow-y: auto; max-height: 260px; }
         .diff-line { padding: 4px 8px; border-radius: 2px; margin-bottom: 2px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 10px; transition: background 0.1s; }
         .diff-line:hover { background: var(--vscode-list-hoverBackground); }
         .diff-content-box { display: flex; align-items: center; gap: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -891,6 +891,13 @@
             } catch (e) { results.innerHTML = "<div style='color:var(--vscode-errorForeground)'>❌ Error: " + e.message + "</div>"; }
         }
 
+        function valuesEqual(a, b) {
+            if (a === b) return true;
+            const na = (a === null || a === undefined) ? 'null' : String(a);
+            const nb = (b === null || b === undefined) ? 'null' : String(b);
+            return na === nb;
+        }
+
         function findDiffs(obj1, obj2, path = "root") {
             let diffs = [];
             for (let key in obj1) {
@@ -899,7 +906,7 @@
                     diffs.push({type: 'removed', path: curPath, key: key, val: obj1[key]});
                 } else if (typeof obj1[key] === 'object' && obj1[key] !== null && typeof obj2[key] === 'object' && obj2[key] !== null) {
                     diffs = diffs.concat(findDiffs(obj1[key], obj2[key], curPath));
-                } else if (obj1[key] !== obj2[key]) {
+                } else if (!valuesEqual(obj1[key], obj2[key])) {
                     diffs.push({type: 'changed', path: curPath, key: key, oldVal: obj1[key], newVal: obj2[key]});
                 }
             }
@@ -1010,9 +1017,20 @@
                     if (obj.hasOwnProperty(prop)) {
                         const safeProp = sanitizeXmlKey(prop);
                         if (Array.isArray(obj[prop])) {
-                            obj[prop].forEach(item => { xml += jsonToXml(item, safeProp).replace('<?xml version="1.0" encoding="UTF-8"?>\n', ''); });
+                            if (obj[prop].length === 0) {
+                                // Empty arrays have no children to represent them in XML;
+                                // mark them so the reverse conversion can rebuild an empty array.
+                                xml += `<${safeProp} __jsontype="array"></${safeProp}>`;
+                            } else {
+                                obj[prop].forEach(item => { xml += jsonToXml(item, safeProp).replace('<?xml version="1.0" encoding="UTF-8"?>\n', ''); });
+                            }
                         } else if (typeof obj[prop] === "object" && obj[prop] !== null) {
-                            xml += jsonToXml(obj[prop], safeProp).replace('<?xml version="1.0" encoding="UTF-8"?>\n', '');
+                            if (Object.keys(obj[prop]).length === 0) {
+                                // Same problem for empty objects: mark them explicitly.
+                                xml += `<${safeProp} __jsontype="object"></${safeProp}>`;
+                            } else {
+                                xml += jsonToXml(obj[prop], safeProp).replace('<?xml version="1.0" encoding="UTF-8"?>\n', '');
+                            }
                         } else {
                             const val = String(obj[prop]).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
                             xml += `<${safeProp}>${val}</${safeProp}>`;
@@ -1029,10 +1047,17 @@
                 if (xml.attributes.length > 0) {
                     for (let j = 0; j < xml.attributes.length; j++) {
                         const attr = xml.attributes.item(j);
+                        if (attr.nodeName === '__jsontype') continue;
                         obj["@" + attr.nodeName] = attr.nodeValue;
                     }
                 }
             } else if (xml.nodeType === 3) { obj = xml.nodeValue; }
+            if (xml.nodeType === 1 && !xml.hasChildNodes()) {
+                const typeHint = xml.getAttribute ? xml.getAttribute('__jsontype') : null;
+                if (typeHint === 'array') return [];
+                if (typeHint === 'object') return {};
+                if (Object.keys(obj).length === 0) return '';
+            }
             if (xml.hasChildNodes()) {
                 for (let i = 0; i < xml.childNodes.length; i++) {
                     const item = xml.childNodes.item(i);
