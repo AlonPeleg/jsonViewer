@@ -475,7 +475,9 @@
         function setEntryTreeCollapse(btn, collapse) {
             const entry = btn.closest('.entry');
             const content = entry.querySelector('.content');
-            content.querySelectorAll('.json-node').forEach(n => {
+            // Only collapse nodes nested inside the tree (i.e. inside a .json-tree wrapper) —
+            // the root node itself is a direct child of .content and should stay expanded.
+            content.querySelectorAll('.json-tree .json-node').forEach(n => {
                 const toggle = n.querySelector(':scope > .header-line > .toggle');
                 if (toggle) {
                     collapse ? n.classList.add('collapsed') : n.classList.remove('collapsed');
@@ -682,7 +684,9 @@
         function setEditorTreeCollapse(panelId, collapse) {
             setEditorMode(panelId, 'tree', null);
             const treeDiv = document.getElementById(panelId + 'Tree');
-            treeDiv.querySelectorAll('.json-node.is-object, .json-node.is-array').forEach(n => {
+            // Same rule as the viewer tab: leave the root node itself expanded, only
+            // collapse its descendants (anything nested inside a .json-tree wrapper).
+            treeDiv.querySelectorAll('.json-tree .json-node.is-object, .json-tree .json-node.is-array').forEach(n => {
                 collapse ? n.classList.add('collapsed') : n.classList.remove('collapsed');
             });
         }
