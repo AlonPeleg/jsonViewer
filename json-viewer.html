@@ -59,6 +59,7 @@
         .btn-global-icon:hover { background: var(--vscode-toolbar-hoverBackground); opacity: 1; }
         .btn-global-icon svg { width: 15px; height: 15px; fill: var(--vscode-foreground); }
         .input-box { width: 100%; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); padding: 8px; margin-bottom: 10px; font-family: monospace; border-radius: 4px; box-sizing: border-box; outline: none; font-size: 12px; }
+        .input-box.file-drop-target { outline: 2px dashed var(--vscode-focusBorder); outline-offset: 2px; }
         
         /* Layout modes for #container */
         #container { display: flex; flex-direction: column; gap: 10px; }
@@ -84,6 +85,15 @@
         .btn-copy svg { width: 13px; height: 13px; fill: #cccccc; }
         .btn-minify svg { width: 14px; height: 14px; fill: #dcdcaa; }
         .btn-convert svg { width: 14px; height: 14px; }
+        .btn-focus svg { width: 13px; height: 13px; fill: #cccccc; }
+        .btn-viewer svg { width: 14px; height: 14px; fill: #4ec9b0; }
+
+        /* --- Focus mode (pop-up single entry, blurred background) --- */
+        #focus-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); z-index: 9000; display: none; align-items: center; justify-content: center; padding: 30px; box-sizing: border-box; }
+        #focus-overlay.active { display: flex; }
+        .entry.focused-entry { width: min(1000px, 92vw); max-height: 88vh; box-shadow: 0 10px 50px rgba(0, 0, 0, 0.7); }
+        .focus-close-btn { position: absolute; top: 18px; right: 22px; z-index: 9001; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; width: 28px; height: 28px; border-radius: 50%; font-size: 16px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .focus-close-btn:hover { filter: brightness(1.3); }
         .search-container { display: flex; align-items: center; background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); border-radius: 2px; width: 130px; }
         .search-inline { width: 100%; background: transparent; color: var(--vscode-input-foreground); border: none; font-size: 10px; padding: 1px 4px; outline: none; }
         .search-counter { font-size: 9px; padding: 0 4px; opacity: 0.7; font-family: monospace; }
@@ -188,10 +198,14 @@
                     <button class="btn-global-icon" title="Expand All" onclick="setAllCollapse(false)">
                         <svg viewBox="0 0 16 16"><path d="M11 11H5V5h6v6zm3-9H2v12h12V2zM3 13V3h10v10H3z"/></svg>
                     </button>
+                    <button class="btn-global-icon" title="Upload JSON/XML file(s)" onclick="document.getElementById('jsonFileInput').click()">
+                        <svg viewBox="0 0 16 16"><path d="M8 1.5l3.75 3.75-1.06 1.06L8.75 4.37V10h-1.5V4.37L5.31 6.31 4.25 5.25 8 1.5zM2 12h12v2.5H2V12z"/></svg>
+                    </button>
+                    <input type="file" id="jsonFileInput" accept=".json,.xml,application/json,text/xml" multiple style="display:none" onchange="handleJsonFileUpload(this.files)">
                     <button class="btn btn-secondary" onclick="clearAllEntries()">Clear All</button>
                 </div>
             </div>
-            <textarea class="input-box" id="jsonInput" rows="2" placeholder="Paste JSON or XML here and press Enter..." autofocus></textarea>
+            <textarea class="input-box" id="jsonInput" rows="2" placeholder="Paste JSON or XML here, drop a file, or press Enter..." autofocus></textarea>
             <div id="container"></div>
         </div>
 
@@ -207,6 +221,7 @@
                         </div>
                     </label>
                     <button class="btn btn-secondary" onclick="formatEditorPanel('editorLeft'); formatEditorPanel('editorRight');">Format Both</button>
+                    <button class="btn btn-secondary" onclick="clearEditorCompareAll()">Reset Section</button>
                 </div>
             </div>
 
@@ -232,6 +247,7 @@
                             <div class="btn-icon btn-minify" id="editorLeftIconMinify" title="Copy Minified" onclick="editorCopyMinified('editorLeft')"></div>
                             <div class="btn-icon btn-copy" id="editorLeftIconCopy" title="Copy Formatted (as JSON)" onclick="editorCopyFormatted('editorLeft')"></div>
                             <div class="btn-icon btn-save" id="editorLeftIconSave" title="Save to PC" onclick="editorSaveToFile('editorLeft')"></div>
+                            <div class="btn-icon btn-viewer" id="editorLeftIconViewer" title="Save to Viewer" onclick="editorSaveToViewer('editorLeft')"></div>
                         </div>
                         <div class="search-container">
                             <input type="text" class="search-inline" placeholder="Find..." oninput="editorSearch('editorLeft', this)" onkeydown="editorSearchNav(event, 'editorLeft')">
@@ -260,6 +276,7 @@
                             <div class="btn-icon btn-minify" id="editorRightIconMinify" title="Copy Minified" onclick="editorCopyMinified('editorRight')"></div>
                             <div class="btn-icon btn-copy" id="editorRightIconCopy" title="Copy Formatted (as JSON)" onclick="editorCopyFormatted('editorRight')"></div>
                             <div class="btn-icon btn-save" id="editorRightIconSave" title="Save to PC" onclick="editorSaveToFile('editorRight')"></div>
+                            <div class="btn-icon btn-viewer" id="editorRightIconViewer" title="Save to Viewer" onclick="editorSaveToViewer('editorRight')"></div>
                         </div>
                         <div class="search-container">
                             <input type="text" class="search-inline" placeholder="Find..." oninput="editorSearch('editorRight', this)" onkeydown="editorSearchNav(event, 'editorRight')">
@@ -277,10 +294,15 @@
                 <div class="btn-group">
                     <button id="editorToggleDiffView" class="btn btn-secondary" onclick="toggleEditorDiffMode()">View: List</button>
                     <button class="btn" onclick="runEditorCompare()">Compare Panels</button>
+                    <button class="btn btn-secondary" onclick="clearEditorCompareResults()">Clear Compare</button>
                 </div>
             </div>
             <div id="editorCompareResults" class="diff-output">Click "Compare Panels" to see the differences between Panel A and Panel B.</div>
         </div>
+    </div>
+
+    <div id="focus-overlay" onclick="if(event.target === this) closeFocusEntry();">
+        <div class="focus-close-btn" title="Close (Esc)" onclick="closeFocusEntry()">×</div>
     </div>
 
     <script>
@@ -361,6 +383,25 @@
             if (counter) counter.textContent = '0/0';
         }
 
+        function clearEditorCompareResults() {
+            isEditorSideMode = false;
+            const diffBtn = document.getElementById('editorToggleDiffView');
+            if (diffBtn) diffBtn.textContent = 'View: List';
+            const results = document.getElementById('editorCompareResults');
+            if (results) results.innerHTML = 'Click "Compare Panels" to see the differences between Panel A and Panel B.';
+        }
+
+        function clearEditorCompareAll() {
+            ['editorLeft', 'editorRight'].forEach(panelId => {
+                clearEditorPanel(panelId);
+                setEditorMode(panelId, 'edit', null);
+                editorSearchState[panelId] = { matches: [], index: -1 };
+                const searchInput = document.querySelector(`#${panelId}Col .search-inline`);
+                if (searchInput) searchInput.value = '';
+            });
+            clearEditorCompareResults();
+        }
+
         function switchTab(paneId, element) {
             document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
             document.querySelectorAll('.tab-link').forEach(l => l.classList.remove('active'));
@@ -374,6 +415,8 @@
         const minifyIconSvg = `<svg viewBox="0 0 16 16"><path d="M9 9h5v1H9V9zM2 9h5v1H2V9zM5 4h6v1H5V4zM2 12h12v1H2v-1zM2 6h12v1H2V6z"/></svg>`;
         const jsonIconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="#f1c40f" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3c-1.5 0-2 1-2 2v4.5c0 1.5-1 2-1 2.5 0 .5 1 1 1 2.5V19c0 1 1 2 2 2M16 3c1.5 0 2 1 2 2v4.5c0 1.5-1 2-1 2.5 0 .5-1 1-1 2.5V19c0 1-1 2-2 2" /></svg>`;
         const xmlIconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="#3498db" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m7 8-5 4 5 4M17 8l5 4-5 4" /></svg>`;
+        const focusIconSvg = `<svg viewBox="0 0 16 16"><path d="M1 1h5v1.5H2.5V6H1V1zm14 0v5h-1.5V2.5H10V1h5zM1 15v-5h1.5v3.5H6V15H1zm14 0h-5v-1.5h3.5V10H15v5z"/></svg>`;
+        const toViewerIconSvg = `<svg viewBox="0 0 16 16"><path d="M8 0l4.5 4.5-1.06 1.06L8.75 2.87V10h-1.5V2.87L4.56 5.56 3.5 4.5 8 0zM1 12h14v1.5H1V12z"/></svg>`;
 
         let currentMatches = [];
         let activeMatchIndex = -1;
@@ -425,6 +468,17 @@
             });
         }
 
+        function setEntryTreeCollapse(btn, collapse) {
+            const entry = btn.closest('.entry');
+            const content = entry.querySelector('.content');
+            content.querySelectorAll('.json-node').forEach(n => {
+                const toggle = n.querySelector(':scope > .header-line > .toggle');
+                if (toggle) {
+                    collapse ? n.classList.add('collapsed') : n.classList.remove('collapsed');
+                }
+            });
+        }
+
         function updateEntryName(input) {
             const entry = input.closest('.entry');
             const item = postedEntries.find(e => e.id === entry.dataset.entryId);
@@ -442,6 +496,41 @@
             saveEntriesToStorage();
             renderEditorChips();
         }
+
+        let focusedEntryPlaceholder = null;
+
+        function focusEntry(btn) {
+            const entry = btn.closest('.entry');
+            const overlay = document.getElementById('focus-overlay');
+
+            // Leave a placeholder marker so we can restore the entry to its exact spot on close.
+            focusedEntryPlaceholder = document.createComment('focus-placeholder');
+            entry.parentNode.insertBefore(focusedEntryPlaceholder, entry);
+
+            entry.classList.add('focused-entry');
+            overlay.appendChild(entry);
+            overlay.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeFocusEntry() {
+            const overlay = document.getElementById('focus-overlay');
+            const entry = overlay.querySelector('.entry.focused-entry');
+            if (entry && focusedEntryPlaceholder) {
+                entry.classList.remove('focused-entry');
+                focusedEntryPlaceholder.parentNode.insertBefore(entry, focusedEntryPlaceholder);
+                focusedEntryPlaceholder.remove();
+                focusedEntryPlaceholder = null;
+            }
+            overlay.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && document.getElementById('focus-overlay').classList.contains('active')) {
+                closeFocusEntry();
+            }
+        });
 
         function showLoadTargetMenu(e, entryId) {
             e.stopPropagation();
@@ -659,6 +748,19 @@
             } catch (e) { alert('Invalid JSON: ' + e.message); }
         }
 
+        function editorSaveToViewer(panelId) {
+            const textarea = document.getElementById(panelId);
+            const raw = textarea.value.trim();
+            if (!raw) { alert('Nothing to save — the panel is empty.'); return; }
+            const nameInput = document.getElementById(panelId + 'Name');
+            const name = nameInput ? nameInput.value.trim() : '';
+            const beforeCount = postedEntries.length;
+            processInput(raw, name);
+            if (postedEntries.length > beforeCount) {
+                flashEditorIcon(panelId, 'Viewer');
+            }
+        }
+
         let editorSearchState = {
             editorLeft: { matches: [], index: -1 },
             editorRight: { matches: [], index: -1 }
@@ -826,6 +928,7 @@
             document.getElementById(id + 'IconMinify').innerHTML = minifyIconSvg;
             document.getElementById(id + 'IconCopy').innerHTML = copyIconSvg;
             document.getElementById(id + 'IconSave').innerHTML = saveIconSvg;
+            document.getElementById(id + 'IconViewer').innerHTML = toViewerIconSvg;
         });
 
         document.getElementById('jsonInput').addEventListener('keydown', (e) => {
@@ -833,6 +936,47 @@
                 e.preventDefault();
                 processInput(e.target.value.trim());
                 e.target.value = '';
+            }
+        });
+
+        function handleJsonFileUpload(fileList) {
+            if (!fileList || fileList.length === 0) return;
+            Array.from(fileList).forEach(file => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const raw = (e.target.result || '').trim();
+                    if (!raw) return;
+                    const name = file.name.replace(/\.[^/.]+$/, '');
+                    processInput(raw, name);
+                };
+                reader.onerror = () => alert('Failed to read file: ' + file.name);
+                reader.readAsText(file);
+            });
+            const fileInput = document.getElementById('jsonFileInput');
+            if (fileInput) fileInput.value = '';
+        }
+
+        const jsonInputBox = document.getElementById('jsonInput');
+
+        jsonInputBox.addEventListener('paste', (e) => {
+            if (e.clipboardData && e.clipboardData.files && e.clipboardData.files.length > 0) {
+                e.preventDefault();
+                handleJsonFileUpload(e.clipboardData.files);
+            }
+        });
+
+        jsonInputBox.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            jsonInputBox.classList.add('file-drop-target');
+        });
+        jsonInputBox.addEventListener('dragleave', () => {
+            jsonInputBox.classList.remove('file-drop-target');
+        });
+        jsonInputBox.addEventListener('drop', (e) => {
+            e.preventDefault();
+            jsonInputBox.classList.remove('file-drop-target');
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                handleJsonFileUpload(e.dataTransfer.files);
             }
         });
 
@@ -938,10 +1082,13 @@
                     <span class="type-badge" style="background:${type === 'json' ? '#4ec9b0' : '#569cd6'}">${type}</span>
                     <input type="text" class="name-input" placeholder="Name entry..." value="${savedName}" oninput="updateEntryName(this)">
                     <div class="actions">
+                        <button class="btn-global-icon" title="Collapse All Nodes" onclick="setEntryTreeCollapse(this, true)"><svg viewBox="0 0 16 16"><path d="M9 9H5V5h4v4zm5-7H2v12h12V2zM3 13V3h10v10H3z"/></svg></button>
+                        <button class="btn-global-icon" title="Expand All Nodes" onclick="setEntryTreeCollapse(this, false)"><svg viewBox="0 0 16 16"><path d="M11 11H5V5h6v6zm3-9H2v12h12V2zM3 13V3h10v10H3z"/></svg></button>
                         <div class="btn-icon btn-convert" title="Copy as ${type === 'json' ? 'XML' : 'JSON'}">${type === 'json' ? xmlIconSvg : jsonIconSvg}</div>
                         <div class="btn-icon btn-minify" title="Copy Minified (Unbeautified)">${minifyIconSvg}</div>
                         <div class="btn-icon btn-copy" title="Copy Raw">${copyIconSvg}</div>
                         <div class="btn-icon btn-save" title="Save to PC">${saveIconSvg}</div>
+                        <div class="btn-icon btn-focus" title="Focus" onclick="focusEntry(this)">${focusIconSvg}</div>
                     </div>
                     <div class="search-container">
                         <input type="text" class="search-inline" placeholder="Find..." oninput="initSearch(this)" onkeydown="navigateSearch(event, this)">
@@ -1114,7 +1261,9 @@
                 tree.className = 'json-tree';
                 Array.from(node.children).forEach(child => tree.appendChild(renderXmlTree(child, path + '.' + child.tagName)));
                 div.appendChild(tree);
-                const footer = document.className = 'footer'; footer.style.paddingLeft = '12px';
+                const footer = document.createElement('div');
+                footer.className = 'footer';
+                footer.style.paddingLeft = '12px';
                 footer.innerHTML = `<span class="xml-tag">&lt;/${node.tagName}&gt;</span>`;
                 div.appendChild(footer);
             } else { div.appendChild(line); }
