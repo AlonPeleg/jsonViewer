@@ -1149,8 +1149,16 @@
             } catch (err) { alert('Invalid Format: ' + err.message); }
         }
 
+        // XML element names allow most Unicode letters — Hebrew, Arabic, CJK, Cyrillic,
+        // etc. are all valid — so only characters XML names can never contain (spaces,
+        // quotes, slashes, `<`/`>`/`&`, colons since namespaces aren't supported here...)
+        // get replaced with '_'. Stripping to ASCII, as the previous version did, silently
+        // erased entire non-Latin keys (e.g. a Hebrew "בדיקה" key became just "_____"),
+        // which then propagated into the JSON-XML-JSON round trip.
         function sanitizeXmlKey(key) {
-            return key.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^(\d)/, '_$1');
+            let safe = String(key).replace(/[^\p{L}\p{N}_.-]/gu, '_');
+            if (/^[0-9.-]/.test(safe)) safe = '_' + safe;
+            return safe || '_';
         }
 
         // The "__jsontype" attribute is an internal marker used to losslessly round-trip
@@ -1433,23 +1441,53 @@
                 toggleSpan.style.display = 'inline-block'; toggleSpan.style.width = '12px';
             }
             line.appendChild(toggleSpan);
+            // The tag name is isolated in a <bdi> (same fix as JSON keys/strings elsewhere
+            // in this file) so an RTL tag name like a Hebrew element doesn't drag the
+            // surrounding '<', '>', '/' punctuation out of order under the bidi algorithm.
             const tagOpen = document.createElement('span');
             tagOpen.className = 'xml-tag';
-            tagOpen.textContent = '<' + node.tagName;
+            tagOpen.append('<');
+            const tagOpenName = document.createElement('bdi');
+            tagOpenName.textContent = node.tagName;
+            tagOpen.appendChild(tagOpenName);
             line.appendChild(tagOpen);
             Array.from(node.attributes).forEach(attr => {
                 if (attr.name === '__jsontype') return;
+                // Built via DOM nodes (not innerHTML) so an RTL attribute name/value is
+                // isolated in its own <bdi> rather than reordering the surrounding = " ".
                 const a = document.createElement('span');
-                a.innerHTML = ` <span class="xml-attr">${attr.name}</span>="<span class="string">${attr.value}</span>"`;
+                a.append(' ');
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'xml-attr';
+                const nameBdi = document.createElement('bdi');
+                nameBdi.textContent = attr.name;
+                nameSpan.appendChild(nameBdi);
+                a.appendChild(nameSpan);
+                a.append('="');
+                const valSpan = document.createElement('span');
+                valSpan.className = 'string';
+                const valBdi = document.createElement('bdi');
+                valBdi.textContent = attr.value;
+                valSpan.appendChild(valBdi);
+                a.appendChild(valSpan);
+                a.append('"');
                 line.appendChild(a);
             });
             line.append('>');
             if (!hasChildren && node.textContent) {
                 const txt = document.createElement('span');
-                txt.className = 'xml-text'; txt.textContent = node.textContent;
+                txt.className = 'xml-text';
+                const txtBdi = document.createElement('bdi');
+                txtBdi.textContent = node.textContent;
+                txt.appendChild(txtBdi);
                 line.appendChild(txt);
                 const tagClose = document.createElement('span');
-                tagClose.className = 'xml-tag'; tagClose.textContent = '</' + node.tagName + '>';
+                tagClose.className = 'xml-tag';
+                tagClose.append('</');
+                const tagCloseName = document.createElement('bdi');
+                tagCloseName.textContent = node.tagName;
+                tagClose.appendChild(tagCloseName);
+                tagClose.append('>');
                 line.appendChild(tagClose);
                 div.appendChild(line);
             } else if (hasChildren) {
@@ -1461,7 +1499,7 @@
                 const footer = document.createElement('div');
                 footer.className = 'footer';
                 footer.style.paddingLeft = '12px';
-                footer.innerHTML = `<span class="xml-tag">&lt;/${node.tagName}&gt;</span>`;
+                footer.innerHTML = `<span class="xml-tag">&lt;/<bdi>${node.tagName}</bdi>&gt;</span>`;
                 div.appendChild(footer);
             } else { div.appendChild(line); }
             return div;
