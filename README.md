@@ -51,3 +51,10 @@ git clone [https://github.com/AlonPeleg/jsonViewer.git](https://github.com/AlonP
 # Open in browser
 cd jsonViewer
 open index.html
+
+<img width="1913" height="699" alt="Screenshot 2026-09-07 075115" src="https://github.com/user-attachments/assets/70b19545-bded-425d-b674-2dadfa6f72f5" />
+<img width="1912" height="820" alt="Screenshot 2026-09-07 075145" src="https://github.com/user-attachments/assets/e4baaef7-ffe6-4197-bb06-e67939dd489b" />
+<img width="1908" height="937" alt="Screenshot 2026-09-07 075205" src="https://github.com/user-attachments/assets/ee91c7d1-b436-454e-896d-fb6de9b09eb8" />
+
+
+
