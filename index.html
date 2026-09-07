@@ -119,6 +119,8 @@
         .collapsed > .header-line::after { content: ' ... }'; color: #808080; }
         .collapsed.is-array > .header-line::after { content: ' ... ]'; }
         .key { color: #9cdcfe; } .string { color: #ce9178; } .number { color: #b5cea8; } .boolean, .null { color: #569cd6; }
+        .header-line, .footer { direction: ltr; unicode-bidi: embed; }
+        .key bdi, .string bdi, .xml-attr bdi, .xml-text bdi { unicode-bidi: isolate; }
         .match { background-color: rgba(151, 121, 0, 0.4); border-radius: 1px; }
         .match.current { background-color: #f7d75c; color: #000; border: 1px solid #ffaa00; font-weight: bold; }
         
@@ -1371,7 +1373,14 @@
             line.appendChild(toggleSpan);
             if (key !== null) {
                 const k = document.createElement('span');
-                k.className = 'key'; k.textContent = '"' + key + '": ';
+                k.className = 'key';
+                // Wrap just the key text in <bdi> so a right-to-left key (e.g. Hebrew/Arabic)
+                // can't drag the surrounding quotes/colon out of their normal left-to-right order.
+                k.append('"');
+                const kBdi = document.createElement('bdi');
+                kBdi.textContent = key;
+                k.appendChild(kBdi);
+                k.append('": ');
                 line.appendChild(k);
             }
             if (isObj) {
@@ -1389,7 +1398,15 @@
             } else {
                 const v = document.createElement('span');
                 v.className = data === null ? 'null' : typeof data;
-                v.textContent = typeof data === 'string' ? '"' + data + '"' : String(data);
+                if (typeof data === 'string') {
+                    v.append('"');
+                    const vBdi = document.createElement('bdi');
+                    vBdi.textContent = data;
+                    v.appendChild(vBdi);
+                    v.append('"');
+                } else {
+                    v.textContent = String(data);
+                }
                 line.appendChild(v);
                 node.appendChild(line);
             }
