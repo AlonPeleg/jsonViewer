@@ -55,6 +55,8 @@ open index.html
 ```
 
 <img width="1913" height="699" alt="Screenshot 2026-09-07 075115" src="https://github.com/user-attachments/assets/70b19545-bded-425d-b674-2dadfa6f72f5" />
+<img width="1910" height="943" alt="Screenshot 2026-09-07 075747" src="https://github.com/user-attachments/assets/0f673ba9-1fb9-40ee-95ad-928b7c39b208" />
+<img width="1262" height="534" alt="Screenshot 2026-09-07 075804" src="https://github.com/user-attachments/assets/e688d385-f912-4229-84c5-083be716292a" />
 <img width="1912" height="820" alt="Screenshot 2026-09-07 075145" src="https://github.com/user-attachments/assets/e4baaef7-ffe6-4197-bb06-e67939dd489b" />
 <img width="1908" height="937" alt="Screenshot 2026-09-07 075205" src="https://github.com/user-attachments/assets/ee91c7d1-b436-454e-896d-fb6de9b09eb8" />
 
